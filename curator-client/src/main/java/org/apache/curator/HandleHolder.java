@@ -39,6 +39,8 @@ class HandleHolder
         ZooKeeper getZooKeeper() throws Exception;
         
         String getConnectionString();
+
+        int getNegotiatedSessionTimeoutMs();
     }
 
     HandleHolder(ZookeeperFactory zookeeperFactory, Watcher watcher, EnsembleProvider ensembleProvider, int sessionTimeout, boolean canBeReadOnly)
@@ -55,15 +57,20 @@ class HandleHolder
         return (helper != null) ? helper.getZooKeeper() : null;
     }
 
+    int getNegotiatedSessionTimeoutMs()
+    {
+        return (helper != null) ? helper.getNegotiatedSessionTimeoutMs() : 0;
+    }
+
     String  getConnectionString()
     {
         return (helper != null) ? helper.getConnectionString() : null;
     }
 
-    boolean hasNewConnectionString() 
+    String getNewConnectionString()
     {
         String helperConnectionString = (helper != null) ? helper.getConnectionString() : null;
-        return (helperConnectionString != null) && !ensembleProvider.getConnectionString().equals(helperConnectionString);
+        return ((helperConnectionString != null) && !ensembleProvider.getConnectionString().equals(helperConnectionString)) ? helperConnectionString : null;
     }
 
     void closeAndClear() throws Exception
@@ -107,6 +114,12 @@ class HandleHolder
                         {
                             return connectionString;
                         }
+
+                        @Override
+                        public int getNegotiatedSessionTimeoutMs()
+                        {
+                            return (zooKeeperHandle != null) ? zooKeeperHandle.getSessionTimeout() : 0;
+                        }
                     };
 
                     return zooKeeperHandle;
@@ -117,6 +130,12 @@ class HandleHolder
             public String getConnectionString()
             {
                 return connectionString;
+            }
+
+            @Override
+            public int getNegotiatedSessionTimeoutMs()
+            {
+                return (zooKeeperHandle != null) ? zooKeeperHandle.getSessionTimeout() : 0;
             }
         };
     }

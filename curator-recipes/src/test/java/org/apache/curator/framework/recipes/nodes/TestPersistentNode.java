@@ -74,6 +74,7 @@ public class TestPersistentNode extends BaseClassForTests
         {
             client.start();
             pen = new PersistentNode(client, CreateMode.PERSISTENT, false, "/test", TEST_DATA);
+            pen.debugWaitMsForBackgroundBeforeClose.set(timing.forSleepingABit().milliseconds());
             pen.start();
             Assert.assertTrue(pen.waitForInitialCreate(timing.milliseconds(), TimeUnit.MILLISECONDS));
             client.close(); // cause session to end - force checks that node is persistent

@@ -22,6 +22,7 @@ import com.google.common.collect.Lists;
 import org.apache.curator.ensemble.EnsembleProvider;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.imps.TestCleanState;
 import org.apache.curator.framework.state.ConnectionState;
 import org.apache.curator.framework.state.ConnectionStateListener;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -63,6 +64,17 @@ public class TestInterProcessSemaphoreCluster
             final AtomicReference<String>   connectionString = new AtomicReference<String>(cluster.getConnectString());
             final EnsembleProvider          provider = new EnsembleProvider()
             {
+                @Override
+                public void setConnectionString(String connectionString)
+                {
+                }
+
+                @Override
+                public boolean updateServerListEnabled()
+                {
+                    return false;
+                }
+
                 @Override
                 public void start() throws Exception
                 {
@@ -147,7 +159,7 @@ public class TestInterProcessSemaphoreCluster
                             }
                             finally
                             {
-                                CloseableUtils.closeQuietly(client);
+                                TestCleanState.closeAndTestClean(client);
                             }
                             return null;
                         }

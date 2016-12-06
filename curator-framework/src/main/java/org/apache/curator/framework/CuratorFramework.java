@@ -21,12 +21,18 @@ package org.apache.curator.framework;
 
 import org.apache.curator.CuratorZookeeperClient;
 import org.apache.curator.framework.api.*;
+import org.apache.curator.framework.api.transaction.CuratorMultiTransaction;
+import org.apache.curator.framework.api.transaction.CuratorOp;
 import org.apache.curator.framework.api.transaction.CuratorTransaction;
+import org.apache.curator.framework.api.transaction.TransactionOp;
 import org.apache.curator.framework.imps.CuratorFrameworkState;
 import org.apache.curator.framework.listen.Listenable;
+import org.apache.curator.framework.schema.SchemaSet;
 import org.apache.curator.framework.state.ConnectionStateListener;
+import org.apache.curator.framework.state.ConnectionStateErrorPolicy;
 import org.apache.curator.utils.EnsurePath;
 import org.apache.zookeeper.Watcher;
+import org.apache.zookeeper.server.quorum.flexible.QuorumVerifier;
 
 import java.io.Closeable;
 import java.util.concurrent.TimeUnit;
@@ -122,11 +128,42 @@ public interface CuratorFramework extends Closeable
     public SetACLBuilder setACL();
 
     /**
+     * Start a reconfig builder
+     *
+     * @return builder object
+     */
+    public ReconfigBuilder reconfig();
+
+    /**
+     * Start a getConfig builder
+     *
+     * @return builder object
+     */
+    public GetConfigBuilder getConfig();
+
+    /**
+     * Start a transaction builder
+     *
+     * @return builder object
+     * @deprecated use {@link #transaction()} instead
+     */
+    public CuratorTransaction inTransaction();
+
+    /**
      * Start a transaction builder
      *
      * @return builder object
      */
-    public CuratorTransaction inTransaction();
+    public CuratorMultiTransaction transaction();
+
+    /**
+     * Allocate an operation that can be used with {@link #transaction()}.
+     * NOTE: {@link CuratorOp} instances created by this builder are
+     * reusable.
+     *
+     * @return operation builder
+     */
+    public TransactionOp transactionOp();
 
     /**
      * Perform a sync on the given path - syncs are always in the background
@@ -154,6 +191,12 @@ public interface CuratorFramework extends Closeable
      * @return builder object
      */
     public SyncBuilder sync();
+
+    /**
+     * Start a remove watches builder.
+     * @return builder object
+     */
+    public RemoveWatchesBuilder watches();
 
     /**
      * Returns the listenable interface for the Connect State
@@ -225,7 +268,13 @@ public interface CuratorFramework extends Closeable
      * Call this method on watchers you are no longer interested in.
      *
      * @param watcher the watcher
+     * 
+     * @deprecated As of ZooKeeper 3.5 Curators recipes will handle removing watcher references
+     * when they are no longer used. If you write your own recipe, follow the example of Curator
+     * recipes and use {@link #newWatcherRemoveCuratorFramework} calling {@link WatcherRemoveCuratorFramework#removeWatchers()}
+     * when closing your instance.
      */
+    @Deprecated
     public void clearWatcherReferences(Watcher watcher);
         
     /**
@@ -244,4 +293,34 @@ public interface CuratorFramework extends Closeable
      * @throws InterruptedException If interrupted while waiting
      */
     public void blockUntilConnected() throws InterruptedException;
+
+    /**
+     * Returns a facade of the current instance that tracks
+     * watchers created and allows a one-shot removal of all watchers
+     * via {@link WatcherRemoveCuratorFramework#removeWatchers()}
+     *
+     * @return facade
+     */
+    public WatcherRemoveCuratorFramework newWatcherRemoveCuratorFramework();
+
+    /**
+     * Return the configured error policy
+     *
+     * @return error policy
+     */
+    public ConnectionStateErrorPolicy getConnectionStateErrorPolicy();
+
+    /**
+     * Current maintains a cached view of the Zookeeper quorum config.
+     *
+     * @return the current config
+     */
+    public QuorumVerifier getCurrentConfig();
+
+    /**
+     * Return this instance's schema set
+     *
+     * @return schema set
+     */
+    SchemaSet getSchemaSet();
 }

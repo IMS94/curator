@@ -25,6 +25,7 @@ import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.WatcherRemoveCuratorFramework;
 import org.apache.curator.framework.api.BackgroundCallback;
 import org.apache.curator.framework.api.CuratorEvent;
 import org.apache.curator.framework.api.UnhandledErrorListener;
@@ -244,18 +245,24 @@ public class TreeCache implements Closeable
 
         private void doRefreshChildren() throws Exception
         {
-            client.getChildren().usingWatcher(this).inBackground(this).forPath(path);
+            if ( treeState.get() == TreeState.STARTED )
+            {
+                client.getChildren().usingWatcher(this).inBackground(this).forPath(path);
+            }
         }
 
         private void doRefreshData() throws Exception
         {
-            if ( dataIsCompressed )
+            if ( treeState.get() == TreeState.STARTED )
             {
-                client.getData().decompressed().usingWatcher(this).inBackground(this).forPath(path);
-            }
-            else
-            {
-                client.getData().usingWatcher(this).inBackground(this).forPath(path);
+                if ( dataIsCompressed )
+                {
+                    client.getData().decompressed().usingWatcher(this).inBackground(this).forPath(path);
+                }
+                else
+                {
+                    client.getData().usingWatcher(this).inBackground(this).forPath(path);
+                }
             }
         }
 
@@ -280,7 +287,6 @@ public class TreeCache implements Closeable
         void wasDeleted() throws Exception
         {
             ChildData oldChildData = childData.getAndSet(null);
-            client.clearWatcherReferences(this);
             ConcurrentMap<String, TreeNode> childMap = children.getAndSet(null);
             if ( childMap != null )
             {
@@ -498,7 +504,7 @@ public class TreeCache implements Closeable
     private final AtomicBoolean isInitialized = new AtomicBoolean(false);
 
     private final TreeNode root;
-    private final CuratorFramework client;
+    private final WatcherRemoveCuratorFramework client;
     private final ExecutorService executorService;
     private final boolean cacheData;
     private final boolean dataIsCompressed;
@@ -550,7 +556,8 @@ public class TreeCache implements Closeable
         this.createParentNodes = createParentNodes;
         this.selector = Preconditions.checkNotNull(selector, "selector cannot be null");
         this.root = new TreeNode(validatePath(path), null);
-        this.client = Preconditions.checkNotNull(client, "client cannot be null");
+        Preconditions.checkNotNull(client, "client cannot be null");
+        this.client = client.newWatcherRemoveCuratorFramework();
         this.cacheData = cacheData;
         this.dataIsCompressed = dataIsCompressed;
         this.maxDepth = maxDepth;
@@ -586,6 +593,7 @@ public class TreeCache implements Closeable
     {
         if ( treeState.compareAndSet(TreeState.STARTED, TreeState.CLOSED) )
         {
+            client.removeWatchers();
             client.getConnectionStateListenable().removeListener(connectionStateListener);
             listeners.clear();
             executorService.shutdown();

@@ -22,6 +22,7 @@ package org.apache.curator.framework.recipes.nodes;
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.base.Preconditions;
 import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.WatcherRemoveCuratorFramework;
 import org.apache.curator.framework.api.ACLBackgroundPathAndBytesable;
 import org.apache.curator.framework.api.BackgroundCallback;
 import org.apache.curator.framework.api.CreateBuilder;
@@ -44,6 +45,7 @@ import java.util.Arrays;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
@@ -59,7 +61,7 @@ public class PersistentNode implements Closeable
 {
     private final AtomicReference<CountDownLatch> initialCreateLatch = new AtomicReference<CountDownLatch>(new CountDownLatch(1));
     private final Logger log = LoggerFactory.getLogger(getClass());
-    private final CuratorFramework client;
+    private final WatcherRemoveCuratorFramework client;
     private final CreateModable<ACLBackgroundPathAndBytesable<String>> createMethod;
     private final AtomicReference<String> nodePath = new AtomicReference<String>(null);
     private final String basePath;
@@ -74,32 +76,43 @@ public class PersistentNode implements Closeable
         @Override
         public void process(WatchedEvent event) throws Exception
         {
-            if ( event.getType() == EventType.NodeDeleted )
+            if ( isActive() )
             {
-                createNode();
-            }
-            else if ( event.getType() == EventType.NodeDataChanged )
-            {
-                watchNode();
+                if ( event.getType() == EventType.NodeDeleted )
+                {
+                    createNode();
+                }
+                else if ( event.getType() == EventType.NodeDataChanged )
+                {
+                    watchNode();
+                }
             }
         }
     };
+
     private final BackgroundCallback checkExistsCallback = new BackgroundCallback()
     {
         @Override
-        public void processResult(CuratorFramework client, CuratorEvent event) throws Exception
+        public void processResult(CuratorFramework dummy, CuratorEvent event) throws Exception
         {
-            if ( event.getResultCode() == KeeperException.Code.NONODE.intValue() )
+            if ( isActive() )
             {
-                createNode();
+                if ( event.getResultCode() == KeeperException.Code.NONODE.intValue() )
+                {
+                    createNode();
+                }
+                else
+                {
+                    boolean isEphemeral = event.getStat().getEphemeralOwner() != 0;
+                    if ( isEphemeral != mode.isEphemeral() )
+                    {
+                        log.warn("Existing node ephemeral state doesn't match requested state. Maybe the node was created outside of PersistentNode? " + basePath);
+                    }
+                }
             }
             else
             {
-                boolean isEphemeral = event.getStat().getEphemeralOwner() != 0;
-                if ( isEphemeral != mode.isEphemeral() )
-                {
-                    log.warn("Existing node ephemeral state doesn't match requested state. Maybe the node was created outside of PersistentNode? " + basePath);
-                }
+                client.removeWatchers();
             }
         }
     };
@@ -107,7 +120,7 @@ public class PersistentNode implements Closeable
     {
 
         @Override
-        public void processResult(CuratorFramework client, CuratorEvent event)
+        public void processResult(CuratorFramework dummy, CuratorEvent event)
             throws Exception
         {
             //If the result is ok then initialisation is complete (if we're still initialising)
@@ -123,14 +136,17 @@ public class PersistentNode implements Closeable
     private final ConnectionStateListener connectionStateListener = new ConnectionStateListener()
     {
         @Override
-        public void stateChanged(CuratorFramework client, ConnectionState newState)
+        public void stateChanged(CuratorFramework dummy, ConnectionState newState)
         {
-            if ( newState == ConnectionState.RECONNECTED )
+            if ( (newState == ConnectionState.RECONNECTED) && isActive() )
             {
                 createNode();
             }
         }
     };
+
+    @VisibleForTesting
+    volatile CountDownLatch debugCreateNodeLatch = null;
 
     private enum State
     {
@@ -140,16 +156,16 @@ public class PersistentNode implements Closeable
     }
 
     /**
-     * @param client        client instance
+     * @param givenClient        client instance
      * @param mode          creation mode
      * @param useProtection if true, call {@link CreateBuilder#withProtection()}
      * @param basePath the base path for the node
      * @param initData data for the node
      */
-    public PersistentNode(CuratorFramework client, final CreateMode mode, boolean useProtection, final String basePath, byte[] initData)
+    public PersistentNode(CuratorFramework givenClient, final CreateMode mode, boolean useProtection, final String basePath, byte[] initData)
     {
         this.useProtection = useProtection;
-        this.client = Preconditions.checkNotNull(client, "client cannot be null");
+        this.client = Preconditions.checkNotNull(givenClient, "client cannot be null").newWatcherRemoveCuratorFramework();
         this.basePath = PathUtils.validatePath(basePath);
         this.mode = Preconditions.checkNotNull(mode, "mode cannot be null");
         final byte[] data = Preconditions.checkNotNull(initData, "data cannot be null");
@@ -157,9 +173,9 @@ public class PersistentNode implements Closeable
         backgroundCallback = new BackgroundCallback()
         {
             @Override
-            public void processResult(CuratorFramework client, CuratorEvent event) throws Exception
+            public void processResult(CuratorFramework dummy, CuratorEvent event) throws Exception
             {
-                if ( state.get() == State.STARTED )
+                if ( isActive() )
                 {
                     processBackgroundCallback(event);
                 }
@@ -277,9 +293,24 @@ public class PersistentNode implements Closeable
         return (localLatch == null) || localLatch.await(timeout, unit);
     }
 
+    @VisibleForTesting
+    final AtomicLong debugWaitMsForBackgroundBeforeClose = new AtomicLong(0);
+
     @Override
     public void close() throws IOException
     {
+        if ( debugWaitMsForBackgroundBeforeClose.get() > 0 )
+        {
+            try
+            {
+                Thread.sleep(debugWaitMsForBackgroundBeforeClose.get());
+            }
+            catch ( InterruptedException e )
+            {
+                Thread.currentThread().interrupt();
+            }
+        }
+
         if ( !state.compareAndSet(State.STARTED, State.CLOSED) )
         {
             return;
@@ -296,6 +327,8 @@ public class PersistentNode implements Closeable
             ThreadUtils.checkInterrupted(e);
             throw new IOException(e);
         }
+
+        client.removeWatchers();
     }
 
     /**
@@ -359,6 +392,19 @@ public class PersistentNode implements Closeable
         if ( !isActive() )
         {
             return;
+        }
+
+        if ( debugCreateNodeLatch != null )
+        {
+            try
+            {
+                debugCreateNodeLatch.await();
+            }
+            catch ( InterruptedException e )
+            {
+                Thread.currentThread().interrupt();
+                return;
+            }
         }
 
         try

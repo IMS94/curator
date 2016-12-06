@@ -16,10 +16,17 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.curator.framework.api;
+package org.apache.curator.framework;
 
-public interface ACLBackgroundPathable<T> extends
-    ACLable<BackgroundPathable<T>>,
-    BackgroundPathable<T>
+import org.apache.zookeeper.Watcher;
+
+/**
+ * A CuratorFramework facade that tracks watchers created and allows a one-shot removal of all watchers
+ */
+public interface WatcherRemoveCuratorFramework extends CuratorFramework
 {
+    /**
+     * Remove all outstanding watchers that have been set
+     */
+    void removeWatchers();
 }

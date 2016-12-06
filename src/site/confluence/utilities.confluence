@@ -14,6 +14,18 @@ Various static methods to help with using ZooKeeper ZNode paths:
 * getSortedChildren: Return the children of the given path sorted by sequence number
 * makePath: Given a parent path and a child node, create a combined full path
 
+h2. Locker
+
+Curator's Locker uses Java 7's try\-with\-resources feature to making using Curator locks safer:
+
+{code}
+InterProcessMutex mutex = new InterProcessMutex(...) // or any InterProcessLock
+try ( Locker locker = new Locker(mutex, maxTimeout, unit) )
+{
+   // do work
+}
+{code}
+
 h2. BlockingQueueConsumer
 
 See: *[[DistributedQueue|curator-recipes/distributed-queue.html]]* and *[[DistributedPriorityQueue|curator-recipes/distributed-priority-queue.html]]*
@@ -25,3 +37,9 @@ h2. QueueSharder
 Due to limitations in ZooKeeper's transport layer, a single queue will break if it has more than 10K\-ish items in it. This class
 provides a facade over multiple distributed queues. It monitors the queues and if any one of them goes over a threshold, a new
 queue is added. Puts are distributed amongst the queues.
+
+h2. WatcherRemoveCuratorFramework
+
+Curator has a utility that makes it easy to set watchers and remove them at a later date. It is used for all Curator recipes.
+From your CuratorFramework instance, call newWatcherRemoveCuratorFramework(). When using this proxy instance any watchers that are
+set are recorded. You can then call removeWatchers() to remove those watchers. See the Curator source code for usage details.

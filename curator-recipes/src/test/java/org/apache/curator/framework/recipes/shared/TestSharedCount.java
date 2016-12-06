@@ -23,6 +23,7 @@ import com.google.common.collect.Lists;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
+import org.apache.curator.framework.imps.TestCleanState;
 import org.apache.curator.framework.api.BackgroundCallback;
 import org.apache.curator.framework.api.CuratorEvent;
 import org.apache.curator.framework.state.ConnectionState;
@@ -152,7 +153,7 @@ public class TestSharedCount extends BaseClassForTests
             }
             for ( CuratorFramework client : clients )
             {
-                CloseableUtils.closeQuietly(client);
+                TestCleanState.closeAndTestClean(client);
             }
         }
     }
@@ -167,15 +168,34 @@ public class TestSharedCount extends BaseClassForTests
             client.start();
             count.start();
 
+            final CountDownLatch setLatch = new CountDownLatch(3);
+            SharedCountListener listener = new SharedCountListener()
+            {
+                @Override
+                public void countHasChanged(SharedCountReader sharedCount, int newCount) throws Exception
+                {
+                    setLatch.countDown();
+                }
+
+                @Override
+                public void stateChanged(CuratorFramework client, ConnectionState newState)
+                {
+                    // nop
+                }
+            };
+            count.addListener(listener);
+
             Assert.assertTrue(count.trySetCount(1));
             Assert.assertTrue(count.trySetCount(2));
             Assert.assertTrue(count.trySetCount(10));
             Assert.assertEquals(count.getCount(), 10);
+
+            Assert.assertTrue(new Timing().awaitLatch(setLatch));
         }
         finally
         {
             CloseableUtils.closeQuietly(count);
-            CloseableUtils.closeQuietly(client);
+            TestCleanState.closeAndTestClean(client);
         }
     }
 
@@ -220,7 +240,7 @@ public class TestSharedCount extends BaseClassForTests
         finally
         {
             CloseableUtils.closeQuietly(count);
-            CloseableUtils.closeQuietly(client);
+            TestCleanState.closeAndTestClean(client);
         }
     }
 
@@ -246,19 +266,37 @@ public class TestSharedCount extends BaseClassForTests
             Assert.assertTrue(count2.trySetCount(versionedValue, 20));
             timing.sleepABit();
 
+            final CountDownLatch setLatch = new CountDownLatch(2);
+            SharedCountListener listener = new SharedCountListener()
+            {
+                @Override
+                public void countHasChanged(SharedCountReader sharedCount, int newCount) throws Exception
+                {
+                    setLatch.countDown();
+                }
+
+                @Override
+                public void stateChanged(CuratorFramework client, ConnectionState newState)
+                {
+                    // nop
+                }
+            };
+            count1.addListener(listener);
             VersionedValue<Integer> versionedValue1 = count1.getVersionedValue();
             VersionedValue<Integer> versionedValue2 = count2.getVersionedValue();
             Assert.assertTrue(count2.trySetCount(versionedValue2, 30));
             Assert.assertFalse(count1.trySetCount(versionedValue1, 40));
+
             versionedValue1 = count1.getVersionedValue();
             Assert.assertTrue(count1.trySetCount(versionedValue1, 40));
+            Assert.assertTrue(timing.awaitLatch(setLatch));
         }
         finally
         {
             CloseableUtils.closeQuietly(count2);
             CloseableUtils.closeQuietly(count1);
-            CloseableUtils.closeQuietly(client2);
-            CloseableUtils.closeQuietly(client1);
+            TestCleanState.closeAndTestClean(client2);
+            TestCleanState.closeAndTestClean(client1);
         }
     }
 
@@ -320,7 +358,7 @@ public class TestSharedCount extends BaseClassForTests
         finally
         {
             CloseableUtils.closeQuietly(sharedCount);
-            CloseableUtils.closeQuietly(curatorFramework);
+            TestCleanState.closeAndTestClean(curatorFramework);
         }
     }
 
@@ -386,7 +424,7 @@ public class TestSharedCount extends BaseClassForTests
         finally
         {
             CloseableUtils.closeQuietly(sharedCount);
-            CloseableUtils.closeQuietly(curatorFramework);
+            TestCleanState.closeAndTestClean(curatorFramework);
         }
     }
 }

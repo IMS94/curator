@@ -22,15 +22,16 @@ package org.apache.curator.framework.recipes.locks;
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Sets;
-
-import org.apache.curator.utils.CloseableUtils;
 import org.apache.curator.RetryLoop;
 import org.apache.curator.framework.CuratorFramework;
+import org.apache.curator.framework.WatcherRemoveCuratorFramework;
 import org.apache.curator.framework.api.PathAndBytesable;
 import org.apache.curator.framework.imps.CuratorFrameworkState;
 import org.apache.curator.framework.recipes.shared.SharedCountListener;
 import org.apache.curator.framework.recipes.shared.SharedCountReader;
 import org.apache.curator.framework.state.ConnectionState;
+import org.apache.curator.utils.CloseableUtils;
+import org.apache.curator.utils.PathUtils;
 import org.apache.curator.utils.ThreadUtils;
 import org.apache.curator.utils.ZKPaths;
 import org.apache.zookeeper.CreateMode;
@@ -39,6 +40,7 @@ import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
@@ -46,7 +48,6 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
-import org.apache.curator.utils.PathUtils;
 
 /**
  * <p>
@@ -80,7 +81,7 @@ public class InterProcessSemaphoreV2
 {
     private final Logger log = LoggerFactory.getLogger(getClass());
     private final InterProcessMutex lock;
-    private final CuratorFramework client;
+    private final WatcherRemoveCuratorFramework client;
     private final String leasesPath;
     private final Watcher watcher = new Watcher()
     {
@@ -124,7 +125,7 @@ public class InterProcessSemaphoreV2
 
     private InterProcessSemaphoreV2(CuratorFramework client, String path, int maxLeases, SharedCountReader count)
     {
-        this.client = client;
+        this.client = client.newWatcherRemoveCuratorFramework();
         path = PathUtils.validatePath(path);
         lock = new InterProcessMutex(client, ZKPaths.makePath(path, LOCK_PARENT));
         this.maxLeases = (count != null) ? count.getCount() : maxLeases;
@@ -365,50 +366,57 @@ public class InterProcessSemaphoreV2
                 debugAcquireLatch.await();
             }
 
-            synchronized(this)
+            try
             {
-                for(;;)
+                synchronized(this)
                 {
-                    List<String> children;
-                    try
-                    {
-                        children = client.getChildren().usingWatcher(watcher).forPath(leasesPath);
-                    }
-                    catch ( Exception e )
-                    {
-                        if ( debugFailedGetChildrenLatch != null )
+                    for(;;)
+                    {    
+                        List<String> children;
+                        try
                         {
-                            debugFailedGetChildrenLatch.countDown();
+                            children = client.getChildren().usingWatcher(watcher).forPath(leasesPath);
                         }
-                        returnLease(lease); // otherwise the just created ZNode will be orphaned causing a dead lock
-                        throw e;
-                    }
-                    if ( !children.contains(nodeName) )
-                    {
-                        log.error("Sequential path not found: " + path);
-                        returnLease(lease);
-                        return InternalAcquireResult.RETRY_DUE_TO_MISSING_NODE;
-                    }
-
-                    if ( children.size() <= maxLeases )
-                    {
-                        break;
-                    }
-                    if ( hasWait )
-                    {
-                        long thisWaitMs = getThisWaitMs(startMs, waitMs);
-                        if ( thisWaitMs <= 0 )
+                        catch ( Exception e )
                         {
+                            if ( debugFailedGetChildrenLatch != null )
+                            {
+                                debugFailedGetChildrenLatch.countDown();
+                            }
+                            returnLease(lease); // otherwise the just created ZNode will be orphaned causing a dead lock
+                            throw e;
+                        }
+                        if ( !children.contains(nodeName) )
+                        {
+                            log.error("Sequential path not found: " + path);
                             returnLease(lease);
-                            return InternalAcquireResult.RETURN_NULL;
+                            return InternalAcquireResult.RETRY_DUE_TO_MISSING_NODE;
                         }
-                        wait(thisWaitMs);
-                    }
-                    else
-                    {
-                        wait();
+    
+                        if ( children.size() <= maxLeases )
+                        {
+                            break;
+                        }
+                        if ( hasWait )
+                        {
+                            long thisWaitMs = getThisWaitMs(startMs, waitMs);
+                            if ( thisWaitMs <= 0 )
+                            {
+                                returnLease(lease);
+                                return InternalAcquireResult.RETURN_NULL;
+                            }
+                            wait(thisWaitMs);
+                        }
+                        else
+                        {
+                            wait();
+                        }
                     }
                 }
+            }
+            finally
+            {
+                client.removeWatchers();
             }
         }
         finally

@@ -16,7 +16,6 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-
 package org.apache.curator.framework.imps;
 
 import com.google.common.collect.Queues;
@@ -88,6 +87,21 @@ public class TestFrameworkEdges extends BaseClassForTests
             client.start();
             client.createContainers("/this/does/not/exist");
             Assert.assertNotNull(client.checkExists().forPath("/this/does/not/exist"));
+        }
+        finally
+        {
+            CloseableUtils.closeQuietly(client);
+        }
+    }
+
+    @Test
+    public void testQuickClose() throws Exception
+    {
+        CuratorFramework client = CuratorFrameworkFactory.newClient(server.getConnectString(), timing.session(), 1, new RetryNTimes(0, 0));
+        try
+        {
+            client.start();
+            client.close();
         }
         finally
         {
@@ -173,7 +187,9 @@ public class TestFrameworkEdges extends BaseClassForTests
 
             client = CuratorFrameworkFactory.newClient(server.getConnectString(), timing.session(), 1, new RetryOneTime(1));
             client.start();
-            CreateBuilderImpl createBuilder = (CreateBuilderImpl)client.create().withProtection();
+            
+            CreateBuilderImpl createBuilder = (CreateBuilderImpl)client.create();
+            createBuilder.withProtection();
 
             client.create().forPath(createBuilder.adjustPath(TEST_PATH));
 
@@ -276,7 +292,6 @@ public class TestFrameworkEdges extends BaseClassForTests
     @Test
     public void testGetAclNoStat() throws Exception
     {
-
         CuratorFramework client = CuratorFrameworkFactory.newClient(server.getConnectString(), timing.session(), timing.connection(), new RetryOneTime(1));
         client.start();
         try

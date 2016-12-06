@@ -59,7 +59,7 @@ public class TestFramework extends BaseClassForTests
     @Override
     public void setup() throws Exception
     {
-        System.setProperty("container.checkIntervalMs", "1000");
+        System.setProperty("znode.container.checkIntervalMs", "1000");
         super.setup();
     }
 
@@ -67,8 +67,61 @@ public class TestFramework extends BaseClassForTests
     @Override
     public void teardown() throws Exception
     {
-        System.clearProperty("container.checkIntervalMs");
+        System.clearProperty("znode.container.checkIntervalMs");
         super.teardown();
+    }
+    
+    @Test
+    public void testSessionLossWithLongTimeout() throws Exception
+    {
+
+        final Timing timing = new Timing();
+        //Change this to TRUE and the test will pass.
+        System.setProperty("curator-use-classic-connection-handling", Boolean.FALSE.toString());
+                
+        try(final CuratorFramework client = CuratorFrameworkFactory.newClient(server.getConnectString(), timing.forWaiting().milliseconds(),
+                                                                              timing.connection(), new RetryOneTime(1)))
+        {
+            
+            final CountDownLatch connectedLatch = new CountDownLatch(1);
+            final CountDownLatch lostLatch = new CountDownLatch(1);
+            final CountDownLatch restartedLatch = new CountDownLatch(1);
+            client.getConnectionStateListenable().addListener(new ConnectionStateListener()
+            {
+                @Override
+                public void stateChanged(CuratorFramework client, ConnectionState newState)
+                {
+                    if ( newState == ConnectionState.CONNECTED )
+                    {
+                        connectedLatch.countDown();
+                    }
+                    else if ( newState == ConnectionState.LOST )
+                    {
+                        lostLatch.countDown();
+                    }
+                    else if ( newState == ConnectionState.RECONNECTED  )
+                    {
+                        restartedLatch.countDown();
+                    }
+                }
+            });
+            
+            client.start();
+            
+            Assert.assertTrue(timing.awaitLatch(connectedLatch));
+            
+            server.stop();
+
+            timing.sleepABit();
+            Assert.assertTrue(timing.awaitLatch(lostLatch));
+            
+            server.restart();
+            Assert.assertTrue(timing.awaitLatch(restartedLatch));
+        }
+        finally
+        {
+            System.clearProperty("curator-use-classic-connection-handling");
+        }
     }
 
     @Test
@@ -94,6 +147,85 @@ public class TestFramework extends BaseClassForTests
             server.stop();
             Assert.assertEquals(queue.poll(timing.multiple(4).seconds(), TimeUnit.SECONDS), ConnectionState.SUSPENDED);
             Assert.assertEquals(queue.poll(timing.multiple(4).seconds(), TimeUnit.SECONDS), ConnectionState.LOST);
+        }
+        finally
+        {
+            CloseableUtils.closeQuietly(client);
+        }
+    }
+
+    @Test
+    public void testCreateOrSetData() throws Exception
+    {
+        CuratorFramework client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(1));
+        try
+        {
+            client.start();
+
+            String name = client.create().forPath("/hey", "there".getBytes());
+            Assert.assertEquals(name, "/hey");
+            name = client.create().orSetData().forPath("/hey", "other".getBytes());
+            Assert.assertEquals(name, "/hey");
+            Assert.assertEquals(client.getData().forPath("/hey"), "other".getBytes());
+
+            name = client.create().orSetData().creatingParentsIfNeeded().forPath("/a/b/c", "there".getBytes());
+            Assert.assertEquals(name, "/a/b/c");
+            name = client.create().orSetData().creatingParentsIfNeeded().forPath("/a/b/c", "what".getBytes());
+            Assert.assertEquals(name, "/a/b/c");
+            Assert.assertEquals(client.getData().forPath("/a/b/c"), "what".getBytes());
+
+            final BlockingQueue<CuratorEvent> queue = new LinkedBlockingQueue<>();
+            BackgroundCallback backgroundCallback = new BackgroundCallback()
+            {
+                @Override
+                public void processResult(CuratorFramework client, CuratorEvent event) throws Exception
+                {
+                    queue.add(event);
+                }
+            };
+            client.create().orSetData().inBackground(backgroundCallback).forPath("/a/b/c", "another".getBytes());
+
+            CuratorEvent event = queue.poll(new Timing().milliseconds(), TimeUnit.MILLISECONDS);
+            Assert.assertNotNull(event);
+            Assert.assertEquals(event.getResultCode(), KeeperException.Code.OK.intValue());
+            Assert.assertEquals(event.getType(), CuratorEventType.CREATE);
+            Assert.assertEquals(event.getPath(), "/a/b/c");
+            Assert.assertEquals(event.getName(), "/a/b/c");
+
+            // callback should only be called once
+            CuratorEvent unexpectedEvent = queue.poll(new Timing().milliseconds(), TimeUnit.MILLISECONDS);
+            Assert.assertNull(unexpectedEvent);
+        }
+        finally
+        {
+            CloseableUtils.closeQuietly(client);
+        }
+    }
+
+    @Test
+    public void testQuietDelete() throws Exception
+    {
+        CuratorFramework client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(1));
+        try
+        {
+            client.start();
+
+            client.delete().quietly().forPath("/foo/bar");
+
+            final BlockingQueue<Integer> rc = new LinkedBlockingQueue<>();
+            BackgroundCallback backgroundCallback = new BackgroundCallback()
+            {
+                @Override
+                public void processResult(CuratorFramework client, CuratorEvent event) throws Exception
+                {
+                    rc.add(event.getResultCode());
+                }
+            };
+            client.delete().quietly().inBackground(backgroundCallback).forPath("/foo/bar/hey");
+
+            Integer code = rc.poll(new Timing().milliseconds(), TimeUnit.MILLISECONDS);
+            Assert.assertNotNull(code);
+            Assert.assertEquals(code.intValue(), KeeperException.Code.OK.intValue());
         }
         finally
         {

@@ -25,6 +25,7 @@ import org.apache.curator.framework.api.transaction.CuratorTransactionResult;
 import org.apache.curator.framework.api.transaction.OperationType;
 import org.apache.curator.retry.RetryOneTime;
 import org.apache.curator.test.BaseClassForTests;
+import org.apache.curator.utils.CloseableUtils;
 import org.apache.zookeeper.CreateMode;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
@@ -33,15 +34,16 @@ import org.testng.Assert;
 import org.testng.annotations.Test;
 import java.util.Collection;
 
-public class TestTransactions extends BaseClassForTests
+@SuppressWarnings("deprecation")
+public class TestTransactionsOld extends BaseClassForTests
 {
     @Test
     public void     testCheckVersion() throws Exception
     {
         CuratorFramework        client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(1));
-        client.start();
         try
         {
+            client.start();
             client.create().forPath("/foo");
             Stat        stat = client.setData().forPath("/foo", "new".getBytes());  // up the version
 
@@ -65,7 +67,7 @@ public class TestTransactions extends BaseClassForTests
         }
         finally
         {
-            client.close();
+            CloseableUtils.closeQuietly(client);
         }
     }
 
@@ -73,9 +75,9 @@ public class TestTransactions extends BaseClassForTests
     public void     testWithNamespace() throws Exception
     {
         CuratorFramework        client = CuratorFrameworkFactory.builder().connectString(server.getConnectString()).retryPolicy(new RetryOneTime(1)).namespace("galt").build();
-        client.start();
         try
         {
+            client.start();
             Collection<CuratorTransactionResult>    results =
                 client.inTransaction()
                     .create().forPath("/foo", "one".getBytes())
@@ -102,7 +104,7 @@ public class TestTransactions extends BaseClassForTests
         }
         finally
         {
-            client.close();
+            CloseableUtils.closeQuietly(client);
         }
     }
 
@@ -153,9 +155,9 @@ public class TestTransactions extends BaseClassForTests
     public void     testBasic() throws Exception
     {
         CuratorFramework        client = CuratorFrameworkFactory.newClient(server.getConnectString(), new RetryOneTime(1));
-        client.start();
         try
         {
+            client.start();
             Collection<CuratorTransactionResult>    results =
                 client.inTransaction()
                     .create().forPath("/foo")
@@ -177,7 +179,7 @@ public class TestTransactions extends BaseClassForTests
         }
         finally
         {
-            client.close();
+            CloseableUtils.closeQuietly(client);
         }
     }
 }

@@ -112,7 +112,7 @@ class Backgrounding
         return callback;
     }
 
-    void checkError(Throwable e) throws Exception
+    void checkError(Throwable e, Watching watching) throws Exception
     {
         if ( e != null )
         {

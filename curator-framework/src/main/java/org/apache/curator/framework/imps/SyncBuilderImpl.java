@@ -104,7 +104,7 @@ public class SyncBuilderImpl implements SyncBuilder, BackgroundOperation<String>
                 public void processResult(int rc, String path, Object ctx)
                 {
                     trace.setReturnCode(rc).setPath(path).commit();
-                    CuratorEvent event = new CuratorEventImpl(client, CuratorEventType.SYNC, rc, path, path, ctx, null, null, null, null, null);
+                    CuratorEvent event = new CuratorEventImpl(client, CuratorEventType.SYNC, rc, path, path, ctx, null, null, null, null, null, null);
                     client.processBackgroundOperation(operationAndData, event);
                 }
             };
@@ -112,14 +112,14 @@ public class SyncBuilderImpl implements SyncBuilder, BackgroundOperation<String>
         }
         catch ( Throwable e )
         {
-            backgrounding.checkError(e);
+            backgrounding.checkError(e, null);
         }
     }
 
     @Override
     public Void forPath(String path) throws Exception
     {
-        OperationAndData<String> operationAndData = new OperationAndData<String>(this, path, backgrounding.getCallback(), null, backgrounding.getContext());
+        OperationAndData<String> operationAndData = new OperationAndData<String>(this, path, backgrounding.getCallback(), null, backgrounding.getContext(), null);
         client.processBackgroundOperation(operationAndData, null);
         return null;
     }

@@ -40,7 +40,7 @@ class ExistsBuilderImpl implements ExistsBuilder, BackgroundOperation<String>, E
     {
         this.client = client;
         backgrounding = new Backgrounding();
-        watching = new Watching();
+        watching = new Watching(client);
         createParentContainersIfNeeded = false;
     }
 
@@ -54,7 +54,7 @@ class ExistsBuilderImpl implements ExistsBuilder, BackgroundOperation<String>, E
     @Override
     public BackgroundPathable<Stat> watched()
     {
-        watching = new Watching(true);
+        watching = new Watching(client, true);
         return this;
     }
 
@@ -132,8 +132,9 @@ class ExistsBuilderImpl implements ExistsBuilder, BackgroundOperation<String>, E
                 @Override
                 public void processResult(int rc, String path, Object ctx, Stat stat)
                 {
-                    trace.setReturnCode(rc).setPath(path).setWithWatcher(watching.getWatcher() != null).setStat(stat).commit();
-                    CuratorEvent event = new CuratorEventImpl(client, CuratorEventType.EXISTS, rc, path, null, ctx, stat, null, null, null, null);
+                    watching.commitWatcher(rc, true);
+                    trace.setReturnCode(rc).setPath(path).setWithWatcher(watching.hasWatcher()).setStat(stat).commit();
+                    CuratorEvent event = new CuratorEventImpl(client, CuratorEventType.EXISTS, rc, path, null, ctx, stat, null, null, null, null, null);
                     client.processBackgroundOperation(operationAndData, event);
                 }
             };
@@ -143,12 +144,12 @@ class ExistsBuilderImpl implements ExistsBuilder, BackgroundOperation<String>, E
             }
             else
             {
-                client.getZooKeeper().exists(operationAndData.getData(), watching.getWatcher(), callback, backgrounding.getContext());
+                client.getZooKeeper().exists(operationAndData.getData(), watching.getWatcher(operationAndData.getData()), callback, backgrounding.getContext());
             }
         }
         catch ( Throwable e )
         {
-            backgrounding.checkError(e);
+            backgrounding.checkError(e, watching);
         }
     }
 
@@ -157,10 +158,12 @@ class ExistsBuilderImpl implements ExistsBuilder, BackgroundOperation<String>, E
     {
         path = client.fixForNamespace(path);
 
+        client.getSchemaSet().getSchema(path).validateWatch(path, watching.isWatched() || watching.hasWatcher());
+
         Stat        returnStat = null;
         if ( backgrounding.inBackground() )
         {
-            OperationAndData<String> operationAndData = new OperationAndData<String>(this, path, backgrounding.getCallback(), null, backgrounding.getContext());
+            OperationAndData<String> operationAndData = new OperationAndData<String>(this, path, backgrounding.getCallback(), null, backgrounding.getContext(), watching);
             if ( createParentContainersIfNeeded )
             {
                 CreateBuilderImpl.backgroundCreateParentsThenNode(client, operationAndData, operationAndData.getData(), backgrounding, true);
@@ -234,13 +237,15 @@ class ExistsBuilderImpl implements ExistsBuilder, BackgroundOperation<String>, E
                     }
                     else
                     {
-                        returnStat = client.getZooKeeper().exists(path, watching.getWatcher());
+                        returnStat = client.getZooKeeper().exists(path, watching.getWatcher(path));
+                        int rc = (returnStat != null) ? KeeperException.NoNodeException.Code.OK.intValue() : KeeperException.NoNodeException.Code.NONODE.intValue();
+                        watching.commitWatcher(rc, true);
                     }
                     return returnStat;
                 }
             }
         );
-        trace.setPath(path).setWithWatcher(watching.getWatcher() != null).setStat(returnStat).commit();
+        trace.setPath(path).setWithWatcher(watching.hasWatcher()).setStat(returnStat).commit();
         return returnStat;
     }
 }

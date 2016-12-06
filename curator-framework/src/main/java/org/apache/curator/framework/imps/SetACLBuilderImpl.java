@@ -114,16 +114,18 @@ class SetACLBuilderImpl implements SetACLBuilder, BackgroundPathable<Stat>, Back
     @Override
     public Stat forPath(String path) throws Exception
     {
-        path = client.fixForNamespace(path);
+        String fixedPath = client.fixForNamespace(path);
+        List<ACL> aclList = acling.getAclList(fixedPath);
+        client.getSchemaSet().getSchema(path).validateGeneral(path, null, aclList);
 
         Stat        resultStat = null;
         if ( backgrounding.inBackground()  )
         {
-            client.processBackgroundOperation(new OperationAndData<String>(this, path, backgrounding.getCallback(), null, backgrounding.getContext()), null);
+            client.processBackgroundOperation(new OperationAndData<String>(this, fixedPath, backgrounding.getCallback(), null, backgrounding.getContext(), null), null);
         }
         else
         {
-            resultStat = pathInForeground(path);
+            resultStat = pathInForeground(fixedPath, aclList);
         }
         return resultStat;
     }
@@ -147,7 +149,7 @@ class SetACLBuilderImpl implements SetACLBuilder, BackgroundPathable<Stat>, Back
                     public void processResult(int rc, String path, Object ctx, Stat stat)
                     {
                         trace.setReturnCode(rc).setPath(path).setStat(stat).commit();
-                        CuratorEvent event = new CuratorEventImpl(client, CuratorEventType.SET_ACL, rc, path, null, ctx, stat, null, null, null, null);
+                        CuratorEvent event = new CuratorEventImpl(client, CuratorEventType.SET_ACL, rc, path, null, ctx, stat, null, null, null, null, null);
                         client.processBackgroundOperation(operationAndData, event);
                     }
                 },
@@ -156,11 +158,11 @@ class SetACLBuilderImpl implements SetACLBuilder, BackgroundPathable<Stat>, Back
         }
         catch ( Throwable e )
         {
-            backgrounding.checkError(e);
+            backgrounding.checkError(e, null);
         }
     }
 
-    private Stat pathInForeground(final String path) throws Exception
+    private Stat pathInForeground(final String path, final List<ACL> aclList) throws Exception
     {
         OperationTrace   trace = client.getZookeeperClient().startAdvancedTracer("SetACLBuilderImpl-Foreground");
         Stat        resultStat = RetryLoop.callWithRetry
@@ -171,7 +173,7 @@ class SetACLBuilderImpl implements SetACLBuilder, BackgroundPathable<Stat>, Back
                 @Override
                 public Stat call() throws Exception
                 {
-                    return client.getZooKeeper().setACL(path, acling.getAclList(path), version);
+                    return client.getZooKeeper().setACL(path, aclList, version);
                 }
             }
         );
